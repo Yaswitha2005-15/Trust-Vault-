@@ -1,0 +1,4 @@
+<Solution>
+  <Project Path="TrustVault.Api/TrustVault.Api.csproj" />
+  <Project Path="TrustVault.Tests/TrustVault.Tests.csproj" />
+</Solution>
