@@ -1,5 +1,5 @@
-using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -14,7 +14,8 @@ public class TrustVaultFixture : IAsyncLifetime
 {
     public const string DemoPassword = "Test-Password-12345!";
 
-        private readonly PostgreSqlContainer _db = new PostgreSqlBuilder("postgres:16").Build();    private WebApplicationFactory<Program> _factory = null!;
+    private readonly PostgreSqlContainer _db = new PostgreSqlBuilder("postgres:16").Build();
+    private WebApplicationFactory<Program> _factory = null!;
 
     public async Task InitializeAsync()
     {
@@ -57,6 +58,18 @@ public class TrustVaultFixture : IAsyncLifetime
             throw new InvalidOperationException(string.Join("; ", result.Errors.Select(e => e.Description)));
         await users.AddToRoleAsync(user, role);
         return user;
+    }
+
+    public async Task SetActiveAsync(Guid userId, bool isActive)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var users = scope.ServiceProvider.GetRequiredService<UserManager<AppUser>>();
+        var user = await users.FindByIdAsync(userId.ToString())
+            ?? throw new InvalidOperationException("User not found.");
+        user.IsActive = isActive;
+        var result = await users.UpdateAsync(user);
+        if (!result.Succeeded)
+            throw new InvalidOperationException(string.Join("; ", result.Errors.Select(e => e.Description)));
     }
 }
 
