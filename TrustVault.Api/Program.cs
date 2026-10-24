@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using TrustVault.Api.Data;
+using TrustVault.Api.Documents;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -69,6 +70,13 @@ builder.Services.AddAntiforgery(o =>
 // CHANGED: AddControllers -> AddControllersWithViews (registers the services the antiforgery filter needs)
 builder.Services.AddControllersWithViews(o => o.Filters.Add(new AutoValidateAntiforgeryTokenAttribute()));
 builder.Services.AddAuthorization();
+builder.Services.AddScoped<IDocumentAuthorizationService, DocumentAuthorizationService>();
+builder.Services.AddSingleton<IFileStorage>(sp =>
+{
+    var config = sp.GetRequiredService<IConfiguration>();
+    var env = sp.GetRequiredService<IWebHostEnvironment>();
+    return new LocalFileStorage(config["Storage:Root"] ?? Path.Combine(env.ContentRootPath, "storage"));
+});
 
 var app = builder.Build();
 
