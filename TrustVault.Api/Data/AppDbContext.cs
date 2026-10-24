@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
+using TrustVault.Api.Audit;
 using TrustVault.Api.Documents;
 
 namespace TrustVault.Api.Data;
@@ -11,6 +12,7 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
 
     public DbSet<Document> Documents => Set<Document>();
     public DbSet<DocumentPermission> DocumentPermissions => Set<DocumentPermission>();
+    public DbSet<AuditEvent> AuditEvents => Set<AuditEvent>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -37,6 +39,17 @@ public class AppDbContext : IdentityDbContext<AppUser, IdentityRole<Guid>, Guid>
             e.HasIndex(x => new { x.DocumentId, x.UserId }).IsUnique().HasFilter("\"RevokedUtc\" IS NULL");
             e.HasOne<Document>().WithMany().HasForeignKey(x => x.DocumentId).OnDelete(DeleteBehavior.Restrict);
             e.HasOne<AppUser>().WithMany().HasForeignKey(x => x.UserId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<AuditEvent>(e =>
+        {
+            e.Property(x => x.Action).HasMaxLength(100).IsRequired();
+            e.Property(x => x.Outcome).HasMaxLength(20).IsRequired();
+            e.Property(x => x.DenyReason).HasMaxLength(100);
+            e.Property(x => x.PrevHash).HasMaxLength(64).IsRequired();
+            e.Property(x => x.Hash).HasMaxLength(64).IsRequired();
+            e.HasIndex(x => x.DocumentId);
+            e.HasIndex(x => x.ActorUserId);
         });
     }
 }

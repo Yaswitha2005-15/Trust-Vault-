@@ -103,7 +103,17 @@ public class TrustVaultFixture : IAsyncLifetime
         foreach (var grant in grants) grant.RevokedUtc = DateTime.UtcNow;
         await db.SaveChangesAsync();
     }
+        // Test-only: lets a test tamper with the audit table directly, like an attacker with database access.
+    public async Task ExecuteSqlAsync(string sql)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        await db.Database.ExecuteSqlRawAsync(sql);
+    }
+ 
 }
 
 [CollectionDefinition("api")]
+    // Test-only: lets a test tamper with the audit table directly, like an attacker with database access.
+
 public class ApiCollection : ICollectionFixture<TrustVaultFixture> { }

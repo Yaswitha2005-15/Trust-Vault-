@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Identity;
+using TrustVault.Api.Audit;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -77,6 +78,7 @@ builder.Services.AddSingleton<IFileStorage>(sp =>
     var env = sp.GetRequiredService<IWebHostEnvironment>();
     return new LocalFileStorage(config["Storage:Root"] ?? Path.Combine(env.ContentRootPath, "storage"));
 });
+builder.Services.AddScoped<IAuditService, AuditService>();
 
 var app = builder.Build();
 
