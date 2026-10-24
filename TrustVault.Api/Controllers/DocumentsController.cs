@@ -2,6 +2,7 @@ using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using TrustVault.Api.Audit;
 using TrustVault.Api.Data;
 using TrustVault.Api.Documents;
@@ -20,8 +21,20 @@ public class UploadRequest
     public string? Category { get; set; }
 }
 
+public class UpdateDocumentRequest
+{
+    [Required, MaxLength(200)]
+    public string Title { get; set; } = "";
+
+    [MaxLength(100)]
+    public string? Category { get; set; }
+}
+
 public record DocumentDto(Guid Id, string Title, string? Category, string OriginalFileName,
     long SizeBytes, Guid OwnerId, DateTime CreatedUtc);
+
+public record DocumentListItem(Guid Id, string Title, string? Category, string OriginalFileName,
+    long SizeBytes, string OwnerEmail, DateTime CreatedUtc, bool IsOwner);
 
 [ApiController]
 [Route("api/documents")]
@@ -59,6 +72,13 @@ public class DocumentsController : ControllerBase
             _logger.LogError(ex, "Could not write audit record for denied {Action}", action);
         }
     }
+
+    // Someone who can already read the document knows it exists, so "not allowed" is a 403.
+    // Everyone else gets the same 404 as a document that does not exist.
+    private IActionResult DeniedResult(string? reason) =>
+        reason is "owner_only" or "insufficient_level"
+            ? StatusCode(StatusCodes.Status403Forbidden)
+            : NotFound();
 
     [HttpPost]
     [RequestSizeLimit(12 * 1024 * 1024)]
@@ -125,6 +145,66 @@ public class DocumentsController : ControllerBase
         return CreatedAtAction(nameof(GetMetadata), new { id = document.Id }, ToDto(document));
     }
 
+    // Search and list. The access filter is part of the query itself, so a document the caller
+    // cannot read can never appear in the results, the count, or the paging.
+    [HttpGet]
+    public async Task<IActionResult> Search([FromQuery] string? q, [FromQuery] string? owner,
+        [FromQuery] string? category, [FromQuery] DateTime? from, [FromQuery] DateTime? to, CancellationToken ct)
+    {
+        if ((q?.Length ?? 0) > 100 || (owner?.Length ?? 0) > 256 || (category?.Length ?? 0) > 100)
+            return BadRequest(new ProblemDetails { Status = 400, Title = "Search text is too long." });
+
+        var userId = CurrentUserId;
+
+        var query =
+            from d in _db.Documents.AsNoTracking()
+            join u in _db.Users.AsNoTracking() on d.OwnerId equals u.Id
+            where d.DeletedUtc == null
+                && (d.OwnerId == userId
+                    || _db.DocumentPermissions.Any(p => p.DocumentId == d.Id && p.UserId == userId && p.RevokedUtc == null))
+            select new { Document = d, OwnerEmail = u.Email };
+
+        if (!string.IsNullOrWhiteSpace(q))
+        {
+            var term = q.Trim().ToLower();
+            query = query.Where(x => x.Document.Title.ToLower().Contains(term));
+        }
+
+        if (!string.IsNullOrWhiteSpace(owner))
+        {
+            var ownerTerm = owner.Trim().ToLower();
+            query = query.Where(x => (x.OwnerEmail ?? "").ToLower().Contains(ownerTerm));
+        }
+
+        if (!string.IsNullOrWhiteSpace(category))
+        {
+            var cat = category.Trim().ToLower();
+            query = query.Where(x => x.Document.Category != null && x.Document.Category.ToLower() == cat);
+        }
+
+        if (from is not null)
+        {
+            var start = DateTime.SpecifyKind(from.Value.Date, DateTimeKind.Utc);
+            query = query.Where(x => x.Document.CreatedUtc >= start);
+        }
+
+        if (to is not null)
+        {
+            var end = DateTime.SpecifyKind(to.Value.Date.AddDays(1), DateTimeKind.Utc);
+            query = query.Where(x => x.Document.CreatedUtc < end);
+        }
+
+        var items = await query
+            .OrderByDescending(x => x.Document.CreatedUtc)
+            .Take(100)
+            .Select(x => new DocumentListItem(x.Document.Id, x.Document.Title, x.Document.Category,
+                x.Document.OriginalFileName, x.Document.SizeBytes, x.OwnerEmail ?? "",
+                x.Document.CreatedUtc, x.Document.OwnerId == userId))
+            .ToListAsync(ct);
+
+        return Ok(items);
+    }
+
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> GetMetadata(Guid id, CancellationToken ct)
     {
@@ -176,6 +256,82 @@ public class DocumentsController : ControllerBase
 
         // Always an attachment with a generic type, so the browser never renders uploaded content.
         return File(stream, "application/octet-stream", result.Granted!.Document.OriginalFileName);
+    }
+
+    // Edit metadata. Needs the Edit level (or ownership).
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> Update(Guid id, [FromBody] UpdateDocumentRequest request, CancellationToken ct)
+    {
+        var result = await _authz.AuthorizeAsync(CurrentUserId, id, DocumentAccess.Edit, ct);
+        if (!result.Allowed)
+        {
+            await AuditDeniedAsync("document.edit", id, result.DenyReason ?? "denied");
+            return DeniedResult(result.DenyReason);
+        }
+
+        // Fail closed: the change and its audit row commit together or not at all.
+        await using var tx = await _db.Database.BeginTransactionAsync(ct);
+
+        var document = await _db.Documents.FirstOrDefaultAsync(d => d.Id == id && d.DeletedUtc == null, ct);
+        if (document is null) return NotFound();
+
+        document.Title = request.Title.Trim();
+        document.Category = string.IsNullOrWhiteSpace(request.Category) ? null : request.Category.Trim();
+        document.UpdatedUtc = DateTime.UtcNow;
+        await _db.SaveChangesAsync(ct);
+
+        await _audit.RecordAsync(CurrentUserId, "document.edit", id, AuditOutcome.Success, null, ct);
+        await tx.CommitAsync(ct);
+
+        return Ok(ToDto(document));
+    }
+
+    // Delete. Owner only. Access ends at once (deleted documents are invisible to the authorisation
+    // service), all grants are closed, and the stored bytes are removed.
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+    {
+        var result = await _authz.AuthorizeAsync(CurrentUserId, id, DocumentAccess.Delete, ct);
+        if (!result.Allowed)
+        {
+            await AuditDeniedAsync("document.delete", id, result.DenyReason ?? "denied");
+            return DeniedResult(result.DenyReason);
+        }
+
+        Guid storedFileId;
+        await using (var tx = await _db.Database.BeginTransactionAsync(ct))
+        {
+            var document = await _db.Documents.FirstOrDefaultAsync(d => d.Id == id && d.DeletedUtc == null, ct);
+            if (document is null) return NotFound();
+
+            var now = DateTime.UtcNow;
+            document.DeletedUtc = now;
+            document.UpdatedUtc = now;
+
+            var grants = await _db.DocumentPermissions
+                .Where(p => p.DocumentId == id && p.RevokedUtc == null)
+                .ToListAsync(ct);
+            foreach (var grant in grants) grant.RevokedUtc = now;
+
+            await _db.SaveChangesAsync(ct);
+            await _audit.RecordAsync(CurrentUserId, "document.delete", id, AuditOutcome.Success, null, ct);
+            await tx.CommitAsync(ct);
+
+            storedFileId = document.StoredFileId;
+        }
+
+        // After the commit: remove the bytes. If this fails the document is still gone for users,
+        // and the leftover file is only an orphan (logged, to be cleaned up later).
+        try
+        {
+            _storage.Delete(storedFileId);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Document {DocumentId} was deleted but its stored file could not be removed", id);
+        }
+
+        return NoContent();
     }
 
     private static DocumentDto ToDto(Document d) =>

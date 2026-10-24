@@ -95,7 +95,7 @@ public class AuditTests
     }
 
     [Fact]
-        [Fact]
+        
     public async Task Denied_request_audit_row_carries_the_response_correlation_id()
     {
         var (owner, csrf, _) = await NewUserAsync(Roles.Owner);
