@@ -5,7 +5,6 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using TrustVault.Api.Data;
 using TrustVault.Api.Documents;
-app.UseMiddleware<TrustVault.Api.SecurityHeadersMiddleware>();  
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -102,6 +101,7 @@ if (args.Contains("--seed"))
     await DbSeeder.SeedAsync(scope.ServiceProvider, demoPassword);
 }
 
+app.UseMiddleware<TrustVault.Api.SecurityHeadersMiddleware>();
 app.UseHttpsRedirection();
 app.UseAuthentication();
 app.UseAuthorization();
