@@ -8,6 +8,13 @@ using TrustVault.Api.Documents;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Cookies are Secure everywhere except Development, unless Security:AllowHttpCookies is set.
+// That flag exists only so the Docker Compose demo works on plain http://localhost.
+// A real deployment sits behind HTTPS and leaves it off.
+var cookieSecurePolicy = builder.Environment.IsDevelopment() || builder.Configuration.GetValue<bool>("Security:AllowHttpCookies")
+    ? CookieSecurePolicy.SameAsRequest
+    : CookieSecurePolicy.Always;
+
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("Default")));
 
@@ -30,9 +37,7 @@ builder.Services.ConfigureApplicationCookie(options =>
     options.Cookie.Name = "tv.auth";
     options.Cookie.HttpOnly = true;
     options.Cookie.SameSite = SameSiteMode.Lax;
-    options.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
-        ? CookieSecurePolicy.SameAsRequest
-        : CookieSecurePolicy.Always;
+    options.Cookie.SecurePolicy = cookieSecurePolicy;
     options.ExpireTimeSpan = TimeSpan.FromMinutes(30);
     options.SlidingExpiration = true;
     // This is an API: answer 401/403 instead of redirecting to a login page.
@@ -62,9 +67,7 @@ builder.Services.AddAntiforgery(o =>
     o.Cookie.Name = "tv.antiforgery";
     o.Cookie.HttpOnly = true;
     o.Cookie.SameSite = SameSiteMode.Lax;
-    o.Cookie.SecurePolicy = builder.Environment.IsDevelopment()
-        ? CookieSecurePolicy.SameAsRequest
-        : CookieSecurePolicy.Always;
+    o.Cookie.SecurePolicy = cookieSecurePolicy;
 });
 
 // Every POST/PUT/PATCH/DELETE in every controller must carry a valid CSRF token.
@@ -81,6 +84,13 @@ builder.Services.AddSingleton<IFileStorage>(sp =>
 builder.Services.AddScoped<IAuditService, AuditService>();
 
 var app = builder.Build();
+
+// Applies pending migrations only when asked: dotnet TrustVault.Api.dll --migrate --seed
+if (args.Contains("--migrate"))
+{
+    using var migrateScope = app.Services.CreateScope();
+    await migrateScope.ServiceProvider.GetRequiredService<AppDbContext>().Database.MigrateAsync();
+}
 
 // Seeding only runs when asked: dotnet run --project TrustVault.Api -- --seed
 if (args.Contains("--seed"))
