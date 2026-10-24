@@ -82,9 +82,15 @@ builder.Services.AddSingleton<IFileStorage>(sp =>
     return new LocalFileStorage(config["Storage:Root"] ?? Path.Combine(env.ContentRootPath, "storage"));
 });
 builder.Services.AddScoped<IAuditService, AuditService>();
+builder.Services.AddHttpContextAccessor();
 
 var app = builder.Build();
-
+app.Use(async (ctx, next) =>
+{
+    ctx.TraceIdentifier = Guid.NewGuid().ToString("N");
+    ctx.Response.Headers["X-Correlation-Id"] = ctx.TraceIdentifier;
+    await next();
+});
 // Applies pending migrations only when asked: dotnet TrustVault.Api.dll --migrate --seed
 if (args.Contains("--migrate"))
 {

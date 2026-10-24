@@ -15,6 +15,7 @@ public class AuditEvent
     public Guid? DocumentId { get; set; }
     public string Outcome { get; set; } = "";
     public string? DenyReason { get; set; }
+    public string? CorrelationId { get; set; }
     public string PrevHash { get; set; } = "";
     public string Hash { get; set; } = "";
 }

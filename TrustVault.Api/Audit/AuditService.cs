@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using TrustVault.Api.Data;
 
@@ -23,7 +24,13 @@ public sealed class AuditService : IAuditService
     private const long ChainLockKey = 727274;
 
     private readonly AppDbContext _db;
-    public AuditService(AppDbContext db) => _db = db;
+    private readonly IHttpContextAccessor _http;
+
+    public AuditService(AppDbContext db, IHttpContextAccessor http)
+    {
+        _db = db;
+        _http = http;
+    }
 
     public static string ComputeHash(string prevHash, AuditEvent e)
     {
@@ -35,6 +42,11 @@ public sealed class AuditService : IAuditService
             e.DocumentId?.ToString("N") ?? "-",
             e.Outcome,
             e.DenyReason ?? "-");
+
+        // Only included when present, so rows written before this column existed still verify.
+        if (e.CorrelationId is not null)
+            canonical += "|" + e.CorrelationId;
+
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical))).ToLowerInvariant();
     }
 
@@ -64,6 +76,7 @@ public sealed class AuditService : IAuditService
             DocumentId = documentId,
             Outcome = outcome,
             DenyReason = denyReason,
+            CorrelationId = _http.HttpContext?.TraceIdentifier,
             PrevHash = prevHash
         };
         auditEvent.Hash = ComputeHash(prevHash, auditEvent);

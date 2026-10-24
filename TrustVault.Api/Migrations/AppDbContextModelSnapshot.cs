@@ -168,6 +168,9 @@ namespace TrustVault.Api.Migrations
                     b.Property<Guid?>("ActorUserId")
                         .HasColumnType("uuid");
 
+                    b.Property<string>("CorrelationId")
+                        .HasColumnType("text");
+
                     b.Property<string>("DenyReason")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)");
