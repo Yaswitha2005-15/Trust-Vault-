@@ -94,8 +94,8 @@ public class AuditTests
             && e.GetProperty("outcome").GetString() == "Success");
     }
 
-    [Fact]
-        
+    
+    [Fact]    
     public async Task Denied_request_audit_row_carries_the_response_correlation_id()
     {
         var (owner, csrf, _) = await NewUserAsync(Roles.Owner);
@@ -115,6 +115,7 @@ public class AuditTests
 
         Assert.True((await VerifyAsync(admin)).GetProperty("valid").GetBoolean());
     }
+    [Fact]
     public async Task Denied_download_is_audited_with_the_real_reason()
     {
         var (owner, csrf, _) = await NewUserAsync(Roles.Owner);
