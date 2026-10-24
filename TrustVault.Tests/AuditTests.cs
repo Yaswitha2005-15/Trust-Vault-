@@ -5,6 +5,7 @@ using System.Text.Json;
 using TrustVault.Api.Data;
 using Xunit;
 
+
 namespace TrustVault.Tests;
 
 [Collection("api")]
@@ -94,6 +95,26 @@ public class AuditTests
     }
 
     [Fact]
+        [Fact]
+    public async Task Denied_request_audit_row_carries_the_response_correlation_id()
+    {
+        var (owner, csrf, _) = await NewUserAsync(Roles.Owner);
+        var id = await UploadOkAsync(owner, csrf);
+        var (stranger, _, strangerUser) = await NewUserAsync(Roles.Viewer);
+
+        var denied = await stranger.GetAsync($"/api/documents/{id}/content");
+        Assert.Equal(HttpStatusCode.NotFound, denied.StatusCode);
+        var correlationId = denied.Headers.GetValues("X-Correlation-Id").Single();
+
+        var (admin, _) = await SignInAsync("admin@trustvault.local");
+        var events = await GetAuditAsync(admin);
+
+        Assert.Contains(events, e => IsDoc(e, id) && IsActor(e, strangerUser.Id)
+            && e.GetProperty("outcome").GetString() == "Denied"
+            && e.GetProperty("correlationId").GetString() == correlationId);
+
+        Assert.True((await VerifyAsync(admin)).GetProperty("valid").GetBoolean());
+    }
     public async Task Denied_download_is_audited_with_the_real_reason()
     {
         var (owner, csrf, _) = await NewUserAsync(Roles.Owner);

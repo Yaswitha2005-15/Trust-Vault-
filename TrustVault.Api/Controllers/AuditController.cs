@@ -37,7 +37,7 @@ public class AuditController : ControllerBase
         var events = await query
             .OrderByDescending(e => e.Id)
             .Take(500)
-            .Select(e => new { e.Id, e.OccurredUtc, e.ActorUserId, e.Action, e.DocumentId, e.Outcome, e.DenyReason })
+            .Select(e => new { e.Id, e.OccurredUtc, e.ActorUserId, e.Action, e.DocumentId, e.Outcome, e.DenyReason, e.CorrelationId })
             .ToListAsync(ct);
 
         return Ok(events);
