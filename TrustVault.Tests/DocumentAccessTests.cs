@@ -66,6 +66,8 @@ public class DocumentAccessTests
         Assert.Equal(PdfBytes, await download.Content.ReadAsByteArrayAsync());
         Assert.Equal("attachment", download.Content.Headers.ContentDisposition?.DispositionType);
         Assert.Contains("nosniff", download.Headers.GetValues("X-Content-Type-Options"));
+        Assert.Equal("application/octet-stream", download.Content.Headers.ContentType?.MediaType);
+        Assert.True(download.Headers.CacheControl?.NoStore == true);
     }
 
     [Fact]
